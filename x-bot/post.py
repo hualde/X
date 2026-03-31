@@ -11,10 +11,8 @@ from dotenv import load_dotenv
 def load_credentials() -> dict:
     """
     Carga y valida las credenciales de la API de X desde el archivo .env.
-    
     Returns:
-        dict: Diccionario que contiene las claves de autenticación requeridas.
-        
+        dict: Diccionario que contiene las claves de autenticación requeridas.  
     Raises:
         ValueError: Si alguna de las credenciales no está configurada.
     """
@@ -36,10 +34,8 @@ def load_credentials() -> dict:
 def get_twitter_clients(credentials: dict) -> Tuple[tweepy.Client, tweepy.API]:
     """
     Autentica y devuelve los clientes de Tweepy (v2 y v1.1).
-    
     Args:
         credentials (dict): Credenciales cargadas con `load_credentials`.
-        
     Returns:
         Tuple[tweepy.Client, tweepy.API]: 
             El cliente v2 se usa para publicar el tweet.
@@ -62,20 +58,15 @@ def get_twitter_clients(credentials: dict) -> Tuple[tweepy.Client, tweepy.API]:
         credentials["access_token_secret"]
     )
     api = tweepy.API(auth)
-    
     return client, api
-
 
 def validate_image(image_path_str: str) -> Path:
     """
     Verifica que la imagen especificada exista y no exceda el límite permitido por la API (5MB).
-    
     Args:
-        image_path_str (str): Ruta al archivo de imagen provista por la CLI.
-        
+        image_path_str (str): Ruta al archivo de imagen provista por la CLI. 
     Returns:
         Path: Objeto pathlib.Path apuntando a una ruta válida y dentro del tamaño permitido.
-        
     Raises:
         FileNotFoundError: Si la ruta de la imagen no existe.
         ValueError: Si no es un archivo o si excede los 5MB.
@@ -102,7 +93,6 @@ def validate_image(image_path_str: str) -> Path:
 def post_tweet(text: str, image_path: str = None) -> None:
     """
     Maneja el flujo de publicación del tweet y subida de media si se especifica.
-    
     Args:
         text (str): Contenido de texto del tweet.
         image_path (str, optional): Ruta a la imagen si se desea adjuntar una. 

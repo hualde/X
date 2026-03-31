@@ -1,0 +1,18 @@
+# Archivos de entorno (Credenciales)
+.env
+
+# Entornos Virtuales
+venv/
+env/
+.venv/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+
+# Entornos de desarrollo
+.idea/
+.vscode/
+
+# Directorio de fotos locales (opcional, para no subir imágenes de prueba)
+photos/

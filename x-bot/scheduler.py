@@ -28,6 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 SCHEDULE_FILE = Path(__file__).parent / "schedule.json"
+PROMPTS_FILE = Path(__file__).parent / "prompts.json"
 POSTED_IMAGES_FILE = Path(__file__).parent / "posted_images.txt"
 PHOTOS_DIR = Path(__file__).parent / "photos"
 
@@ -60,6 +61,13 @@ def get_next_available_image():
             return photo
             
     return None
+
+def load_prompts():
+    """Carga los prompts desde el archivo JSON."""
+    if not PROMPTS_FILE.exists():
+        return {}
+    with open(PROMPTS_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
 
 def load_schedule():
     """Carga la configuración de tweets desde el archivo JSON."""
@@ -118,6 +126,7 @@ def main():
     
     scheduler = BlockingScheduler()
     jobs_data = load_schedule()
+    prompts_data = load_prompts()
     
     if not jobs_data:
         logger.warning("No hay tweets programados en schedule.json. El programa terminará.")
@@ -126,7 +135,15 @@ def main():
     for job in jobs_data:
         hour = job.get("hour")
         minute = job.get("minute", 0)
-        text = job.get("text") or job.get("prompt")
+        day_of_week = job.get("day_of_week", "*") # Por defecto todos los días
+        
+        # Determinar el texto o prompt a usar
+        prompt_id = job.get("prompt_id")
+        if prompt_id and prompt_id in prompts_data:
+            text = prompts_data[prompt_id]
+        else:
+            text = job.get("text") or job.get("prompt")
+
         image = job.get("image")
         jitter = job.get("jitter_minutes", 0)
         use_ai = job.get("use_ai", False)
@@ -135,17 +152,17 @@ def main():
             logger.warning(f"Omitiendo entrada inválida: {job}")
             continue
             
-        # Programar para que ocurra cada día a esa hora
-        trigger = CronTrigger(hour=hour, minute=minute)
+        # Programar con soporte para días de la semana
+        trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute)
         scheduler.add_job(
             safe_post_tweet,
             trigger=trigger,
             args=[text, image, jitter, use_ai],
-            name=f"Tweet_{hour}:{minute:02d}"
+            name=f"Tweet_{hour}:{minute:02d}_{day_of_week}"
         )
-        msg = f"📅 Programada tarea a las {hour:02d}:{minute:02d}"
+        msg = f"📅 Programada tarea ({day_of_week}) a las {hour:02d}:{minute:02d}"
         if use_ai:
-            msg += " (via AI)"
+            msg += f" (via AI, id: {prompt_id or 'direct'})"
         if jitter > 0:
             msg += f" (con hasta {jitter} min de var.)"
         logger.info(f"{msg}")

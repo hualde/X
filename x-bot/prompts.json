@@ -1,0 +1,6 @@
+{
+    "morning": "Escribe un saludo de buenos días optimista y corto para X (Twitter). Menciona el café o el sol. Usa un tono alegre.",
+    "afternoon": "Escribe un tweet sobre productividad, tecnología o algún dato curioso para la tarde. Sé directo, profesional e ingenioso.",
+    "night": "Escribe un tweet reflexivo o tranquilo para cerrar el día, deseando buenas noches. Algo breve que transmita paz.",
+    "weekend": "Escribe un tweet relajado sobre disfrutar el fin de semana, descansar y desconectar."
+}

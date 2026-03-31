@@ -1,24 +1,32 @@
 [
     {
         "hour": 9,
-        "minute": 0,
-        "text": "Escribe un saludo de buenos días optimista y corto para X (Twitter). Menciona el café o el sol.",
+        "day_of_week": "mon-fri",
+        "prompt_id": "morning",
+        "use_ai": true,
+        "image": "AUTO_POOL",
+        "jitter_minutes": 120
+    },
+    {
+        "hour": 9,
+        "day_of_week": "sat-sun",
+        "prompt_id": "weekend",
         "use_ai": true,
         "image": "AUTO_POOL",
         "jitter_minutes": 120
     },
     {
         "hour": 14,
-        "minute": 0,
-        "text": "Escribe un tweet sobre productividad o tecnología para la tarde. Sé directo y profesional.",
+        "day_of_week": "*",
+        "prompt_id": "afternoon",
         "use_ai": true,
         "image": "AUTO_POOL",
         "jitter_minutes": 120
     },
     {
         "hour": 19,
-        "minute": 0,
-        "text": "Escribe un tweet reflexivo para cerrar el día, deseando buenas noches. Algo breve y tranquilo.",
+        "day_of_week": "*",
+        "prompt_id": "night",
         "use_ai": true,
         "image": "AUTO_POOL",
         "jitter_minutes": 120

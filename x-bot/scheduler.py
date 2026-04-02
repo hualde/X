@@ -5,17 +5,21 @@ import random
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-# Importar la función que ya tenemos hecha en post.py
+# Importar la lógica de envío de post.py
 from post import post_tweet
-from ai_generator import generate_tweet_text
 
-# Configuración básica de logs
+# --- CONFIGURACIÓN ---
+START_DATE = datetime(2026, 4, 2) # Fecha en la que empieza el Día 1 del plan
+PLAN_FILE = Path(__file__).parent / "MASTER_CONTENT_PLAN.json"
+POSTED_IMAGES_FILE = Path(__file__).parent / "posted_images.txt"
+
+# Configuración de logs
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -24,13 +28,7 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-
 logger = logging.getLogger(__name__)
-
-SCHEDULE_FILE = Path(__file__).parent / "schedule.json"
-PROMPTS_FILE = Path(__file__).parent / "prompts.json"
-POSTED_IMAGES_FILE = Path(__file__).parent / "posted_images.txt"
-PHOTOS_DIR = Path(__file__).parent / "photos"
 
 def get_posted_images():
     """Carga la lista de imágenes ya publicadas desde el archivo de texto."""
@@ -44,138 +42,127 @@ def mark_image_as_posted(image_name):
     with open(POSTED_IMAGES_FILE, 'a', encoding='utf-8') as f:
         f.write(f"{image_name}\n")
 
-def get_next_available_image():
-    """Busca la primera imagen en la carpeta /photos que no esté en el historial."""
-    if not PHOTOS_DIR.exists():
-        logger.error(f"La carpeta de fotos no existe: {PHOTOS_DIR}")
-        return None
+def run_catch_up():
+    """Revisa el plan desde el primer día y publica lo que esté pendiente antes de la hora actual."""
+    logger.info("🔍 Iniciando revisión de posts pendientes (catch-up)...")
     
-    posted = get_posted_images()
-    extensions = {'.jpg', '.jpeg', '.png', '.webp'}
-    
-    # Listar y ordenar imágenes para llevar un orden secuencial (o usar random.shuffle)
-    all_photos = sorted([f for f in PHOTOS_DIR.iterdir() if f.suffix.lower() in extensions])
-    
-    for photo in all_photos:
-        if photo.name not in posted:
-            return photo
-            
-    return None
-
-def load_prompts():
-    """Carga los prompts desde el archivo JSON."""
-    if not PROMPTS_FILE.exists():
-        return {}
-    with open(PROMPTS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def load_schedule():
-    """Carga la configuración de tweets desde el archivo JSON."""
-    if not SCHEDULE_FILE.exists():
-        logger.error(f"No se encontró el archivo de configuración: {SCHEDULE_FILE}")
-        return []
-    
-    with open(SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def safe_post_tweet(text_or_prompt, image_path_mode, jitter_minutes=0, use_ai=False):
-    """Envoltura para post_tweet que gestiona la selección de imágenes, errores y un retraso aleatorio."""
-    
-    if jitter_minutes > 0:
-        delay_seconds = random.randint(0, jitter_minutes * 60)
-        logger.info(f"⏳ Aplicando retraso aleatorio de {delay_seconds // 60} minutos y {delay_seconds % 60} segundos...")
-        time.sleep(delay_seconds)
-
-    logger.info("⏰ Preparando tarea programada...")
-    
-    # Generar texto con AI si está habilitado
-    if use_ai:
-        logger.info(f"🤖 Generando texto con DeepSeek basado en el prompt: '{text_or_prompt[:30]}...'")
-        text_to_post = generate_tweet_text(text_or_prompt)
-        if not text_to_post:
-            logger.error("❌ Abortando: Falló la generación de texto con AI.")
-            return
-    else:
-        text_to_post = text_or_prompt
-
-    image_to_send = None
-    image_name = None
-    
-    if image_path_mode == "AUTO_POOL":
-        photo_path = get_next_available_image()
-        if photo_path:
-            image_to_send = str(photo_path)
-            image_name = photo_path.name
-            logger.info(f"📸 Imagen seleccionada del pool: {image_name}")
-        else:
-            logger.warning("⚠️ No quedan imágenes disponibles por publicar en la carpeta /photos.")
-    elif image_path_mode:
-        image_to_send = image_path_mode
-        image_name = Path(image_path_mode).name
-
-    try:
-        post_tweet(text=text_to_post, image_path=image_to_send)
-        if image_path_mode == "AUTO_POOL" and image_name:
-            mark_image_as_posted(image_name)
-        logger.info("✅ Tweet enviado correctamente.")
-    except Exception as e:
-        logger.error(f"❌ Error al enviar tweet programado: {e}")
-
-def main():
-    logger.info("🚀 Iniciando el planificador de tweets para X (Twitter)...")
-    
-    scheduler = BlockingScheduler()
-    jobs_data = load_schedule()
-    prompts_data = load_prompts()
-    
-    if not jobs_data:
-        logger.warning("No hay tweets programados en schedule.json. El programa terminará.")
+    if not PLAN_FILE.exists():
+        logger.error(f"❌ No se encontró {PLAN_FILE}. Omite catch-up.")
         return
 
-    for job in jobs_data:
-        hour = job.get("hour")
-        minute = job.get("minute", 0)
-        day_of_week = job.get("day_of_week", "*") # Por defecto todos los días
-        
-        # Determinar el texto o prompt a usar
-        prompt_id = job.get("prompt_id")
-        if prompt_id and prompt_id in prompts_data:
-            text = prompts_data[prompt_id]
-        else:
-            text = job.get("text") or job.get("prompt")
+    try:
+        with open(PLAN_FILE, 'r', encoding='utf-8') as f:
+            plan = json.load(f)
+    except Exception as e:
+        logger.error(f"❌ Error al cargar el plan maestro: {e}")
+        return
+    
+    posted_set = get_posted_images()
+    now = datetime.now()
+    
+    # Horarios base de los slots (momento teórico de publicación)
+    slots_config = {
+        "morning": 9,
+        "afternoon": 14,
+        "night": 19
+    }
 
-        image = job.get("image")
-        jitter = job.get("jitter_minutes", 0)
-        use_ai = job.get("use_ai", False)
+    # Calculamos cuántos días han pasado desde el inicio
+    delta = now - START_DATE
+    current_day_limit = delta.days + 1
+    
+    pending_count = 0
+
+    # Recorremos desde el Día 1 hasta el día actual
+    for day_num in range(1, current_day_limit + 1):
+        day_key = f"day_{day_num}"
+        day_data = plan.get(day_key)
+        if not day_data: continue
         
-        if hour is None or not text:
-            logger.warning(f"Omitiendo entrada inválida: {job}")
-            continue
+        # Fecha correspondiente a este día del plan
+        day_date = START_DATE + timedelta(days=day_num-1)
+        
+        for slot, hour_limit in slots_config.items():
+            slot_data = day_data.get(slot)
+            if not slot_data: continue
             
-        # Programar con soporte para días de la semana
-        trigger = CronTrigger(day_of_week=day_of_week, hour=hour, minute=minute)
-        scheduler.add_job(
-            safe_post_tweet,
-            trigger=trigger,
-            args=[text, image, jitter, use_ai],
-            name=f"Tweet_{hour}:{minute:02d}_{day_of_week}"
-        )
-        msg = f"📅 Programada tarea ({day_of_week}) a las {hour:02d}:{minute:02d}"
-        if use_ai:
-            msg += f" (via AI, id: {prompt_id or 'direct'})"
-        if jitter > 0:
-            msg += f" (con hasta {jitter} min de var.)"
-        logger.info(f"{msg}")
+            image_name = slot_data['image_filename']
+            # Momento en que este post debió haber salido (aprox)
+            theoretical_time = day_date.replace(hour=hour_limit, minute=0, second=0, microsecond=0)
+            
+            # Si la hora ya pasó Y la imagen no está en el registro -> Publicar
+            if theoretical_time < now and image_name not in posted_set:
+                logger.info(f"⏳ Recuperando post pendiente: {day_key} - {slot} ({image_name})")
+                try:
+                    post_tweet(text=slot_data['tweet_text'], image_path=f"photos/{image_name}")
+                    mark_image_as_posted(image_name)
+                    pending_count += 1
+                    time.sleep(10) # Pequeña espera entre publicaciones de recuperación
+                except Exception as e:
+                    logger.error(f"❌ Error al recuperar {day_key} - {slot}: {e}")
 
-    # Capturar señales de terminación para cerrar limpiamente
+    if pending_count > 0:
+        logger.info(f"✅ Se han recuperado {pending_count} posts que estaban pendientes.")
+    else:
+        logger.info("✨ El bot está al día. No se detectaron posts pendientes.")
+
+def post_job(slot):
+    """Tarea programada para publicar el post correspondiente al día actual."""
+    now = datetime.now()
+    delta = now - START_DATE
+    day_num = delta.days + 1
+    day_key = f"day_{day_num}"
+
+    try:
+        with open(PLAN_FILE, 'r', encoding='utf-8') as f:
+            plan = json.load(f)
+        
+        entry = plan.get(day_key, {}).get(slot)
+        if not entry:
+            logger.warning(f"⚠️ No hay contenido definido para {day_key} - {slot}")
+            return
+
+        image_name = entry['image_filename']
+        posted_set = get_posted_images()
+
+        if image_name in posted_set:
+            logger.info(f"⏭️ El post {day_key} - {slot} ({image_name}) ya fue publicado. Saltando...")
+            return
+
+        logger.info(f"🚀 Publicando {day_key} - {slot}...")
+        post_tweet(text=entry['tweet_text'], image_path=f"photos/{image_name}")
+        mark_image_as_posted(image_name)
+        logger.info("✅ Publicación exitosa.")
+        
+    except Exception as e:
+        logger.error(f"❌ Error en la tarea programada ({slot}): {e}")
+
+def main():
+    logger.info("🚀 Iniciando el Bot de Liora Vale...")
+    logger.info(f"📅 Día 1 del plan establecido el: {START_DATE.strftime('%Y-%m-%d')}")
+    
+    # 1. Ponerse al día con lo que no se publicó (Catch-up)
+    run_catch_up()
+
+    # 2. Configurar la agenda para los próximos posts
+    scheduler = BlockingScheduler()
+    
+    # Programamos las 3 franjas horarias con un jitter de 2h (7200 segundos)
+    # Esto significa que el post de las 9:00 saldrá entre las 9:00 y las 11:00
+    scheduler.add_job(post_job, CronTrigger(hour=9, minute=0), args=['morning'], jitter=7200, name="morning_task")
+    scheduler.add_job(post_job, CronTrigger(hour=14, minute=0), args=['afternoon'], jitter=7200, name="afternoon_task")
+    scheduler.add_job(post_job, CronTrigger(hour=19, minute=0), args=['night'], jitter=7200, name="night_task")
+    
+    # Manejo de señales de cierre
     def signal_handler(sig, frame):
-        logger.info("🛑 Deteniendo el planificador...")
+        logger.info("🛑 Deteniendo el bot...")
         scheduler.shutdown()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    logger.info("📅 Tareas programadas. El bot se mantendrá en ejecución.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
